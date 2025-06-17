@@ -286,9 +286,78 @@ function handleDeployRequest($privateKeyPath, $backupDir, $dbPath, $encryptedPay
 
 /**
  * Handle status request
+ * Retrieves and returns the latest N deployment status records from the database
+ * 
+ * @param int $limit Number of recent deployments to return (default: 10)
  */
-function handleStatusRequest() {
-    
+function handleStatusRequest($dbPath=$sqliteDBPath, $limit = 10) {
+    try {
+        // Validate and sanitize the limit parameter
+        $limit = filter_var($limit, FILTER_VALIDATE_INT, [
+            'options' => [
+                'default' => 10,
+                'min_range' => 1,
+                'max_range' => 100
+            ]
+        ]);
+        
+        // Connect to SQLite database
+        $db = new SQLite3($dbPath);
+        
+        // Prepare parameterized query
+        $stmt = $db->prepare("SELECT 
+                    file_path, 
+                    backup_path, 
+                    status, 
+                    file_size, 
+                    file_mode, 
+                    error_message, 
+                    end_time, 
+                    deployment_type 
+                  FROM deployments 
+                  ORDER BY end_time DESC
+                  LIMIT :limit");
+        
+        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+        
+        $deployments = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $deployments[] = [
+                'file_path' => $row['file_path'],
+                'backup_path' => $row['backup_path'],
+                'status' => $row['status'],
+                'file_size' => (int)$row['file_size'],
+                'file_mode' => $row['file_mode'],
+                'error_message' => $row['error_message'],
+                'end_time' => $row['end_time'],
+                'deployment_type' => $row['deployment_type']
+            ];
+        }
+        
+        // Get total count of deployments for reference
+        $totalCount = $db->querySingle("SELECT COUNT(*) FROM deployments");
+        
+        // Close database connection
+        $db->close();
+        
+        // Return successful response with deployments data
+        echo json_encode([
+            'success' => true,
+            'limit' => $limit,
+            'total_deployments' => (int)$totalCount,
+            'deployments' => $deployments
+        ]);
+        
+    } catch (Exception $e) {
+        // Handle database errors
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => 'Failed to retrieve deployment status',
+            'details' => $e->getMessage()
+        ]);
+    }
 }
 
 
